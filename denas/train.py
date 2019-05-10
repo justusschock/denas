@@ -7,15 +7,14 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 from torchvision import datasets, transforms
 from torch.utils.data.dataset import Subset
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from models.controller import Controller
-from models.shared_cnn import SharedCNN
-from utils.utils import AverageMeter, Logger
-from utils.cutout import Cutout
+from denas.models.controller import Controller
+from denas.models.shared_cnn import SharedCNN
+from denas.utils.utils import AverageMeter, Logger
+from denas.utils.cutout import Cutout
 
 parser = argparse.ArgumentParser(description='ENAS')
 
