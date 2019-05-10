@@ -182,3 +182,5 @@ class Controller(torch.nn.Module):
 
         skip_penaltys = torch.stack(skip_penaltys)
         self.skip_penaltys = torch.mean(skip_penaltys)
+
+        return self.sample_arc
