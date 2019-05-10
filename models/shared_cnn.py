@@ -1,49 +1,76 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 
-'''
-Implementation Notes:
--Setting track_running_stats to True in BatchNorm layers seems to hurt validation
-    and test performance for some reason, so here it is disabled even though it
-    is used in the official implementation.
-'''
+"""
+Notes
+-----
+
+This implementation uses Instancenorm instead of Batchnorm to enable small 
+batchsizes
+"""
 
 
-class FactorizedReduction(nn.Module):
-    '''
-    Reduce both spatial dimensions (width and height) by a factor of 2, and 
+class FactorizedReduction(torch.nn.Module):
+    """
+    Reduce both spatial dimensions (width and height) by a factor of 2, and
     potentially to change the number of output filters
 
-    https://github.com/melodyguan/enas/blob/master/src/cifar10/general_child.py#L129
-    '''
+    """
 
     def __init__(self, in_planes, out_planes, stride=2):
-        super(FactorizedReduction, self).__init__()
+        """
+
+        Parameters
+        ----------
+        in_planes : int
+            number of input planes
+        out_planes : int
+            number of output planes
+        stride : int
+            reduction stride
+
+        """
+        super().__init__()
 
         assert out_planes % 2 == 0, (
-        "Need even number of filters when using this factorized reduction.")
+            "Need even number of filters when using this factorized reduction.")
 
         self.in_planes = in_planes
         self.out_planes = out_planes
         self.stride = stride
 
         if stride == 1:
-            self.fr = nn.Sequential(
-                nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=False),
-                nn.BatchNorm2d(out_planes, track_running_stats=False))
+            self.fr = torch.nn.Sequential(
+                torch.nn.Conv2d(in_planes, out_planes, kernel_size=1,
+                                bias=False),
+                torch.nn.InstanceNorm2d(out_planes))
         else:
-            self.path1 = nn.Sequential(
-                nn.AvgPool2d(1, stride=stride),
-                nn.Conv2d(in_planes, out_planes // 2, kernel_size=1, bias=False))
+            self.path1 = torch.nn.Sequential(
+                torch.nn.AvgPool2d(1, stride=stride),
+                torch.nn.Conv2d(in_planes, out_planes // 2, kernel_size=1,
+                                bias=False))
 
-            self.path2 = nn.Sequential(
-                nn.AvgPool2d(1, stride=stride),
-                nn.Conv2d(in_planes, out_planes // 2, kernel_size=1, bias=False))
-            self.bn = nn.BatchNorm2d(out_planes, track_running_stats=False)
+            self.path2 = torch.nn.Sequential(
+                torch.nn.AvgPool2d(1, stride=stride),
+                torch.nn.Conv2d(in_planes, out_planes // 2, kernel_size=1,
+                                bias=False))
+            self.bn = torch.nn.InstanceNorm2d(out_planes)
 
     def forward(self, x):
+        """
+        Feed tensor through layer
+
+        Parameters
+        ----------
+        x : :class:`torch.Tensor`
+            input tensor
+
+        Returns
+        -------
+        :class:`torch.Tensor`
+            result tensor
+
+        """
         if self.stride == 1:
             return self.fr(x)
         else:
@@ -59,25 +86,37 @@ class FactorizedReduction(nn.Module):
             return out
 
 
-class ENASLayer(nn.Module):
-    '''
-    https://github.com/melodyguan/enas/blob/master/src/cifar10/general_child.py#L245
-    '''
+class ENASLayer(torch.nn.Module):
+
     def __init__(self, layer_id, in_planes, out_planes):
-        super(ENASLayer, self).__init__()
+        """
+
+        Parameters
+        ----------
+        layer_id :
+            current layer
+        in_planes : int
+            number of input planes
+        out_planes : int
+            number of output planes
+
+        """
+        super().__init__()
 
         self.layer_id = layer_id
         self.in_planes = in_planes
         self.out_planes = out_planes
 
         self.branch_0 = ConvBranch(in_planes, out_planes, kernel_size=3)
-        self.branch_1 = ConvBranch(in_planes, out_planes, kernel_size=3, separable=True)
+        self.branch_1 = ConvBranch(in_planes, out_planes, kernel_size=3,
+                                   separable=True)
         self.branch_2 = ConvBranch(in_planes, out_planes, kernel_size=5)
-        self.branch_3 = ConvBranch(in_planes, out_planes, kernel_size=5, separable=True)
+        self.branch_3 = ConvBranch(in_planes, out_planes, kernel_size=5,
+                                   separable=True)
         self.branch_4 = PoolBranch(in_planes, out_planes, 'avg')
         self.branch_5 = PoolBranch(in_planes, out_planes, 'max')
 
-        self.bn = nn.BatchNorm2d(out_planes, track_running_stats=False)
+        self.bn = torch.nn.InstanceNorm2d(out_planes)
 
     def forward(self, x, prev_layers, sample_arc):
         layer_type = sample_arc[0]
@@ -109,12 +148,23 @@ class ENASLayer(nn.Module):
         return out
 
 
-class FixedLayer(nn.Module):
-    '''
-    https://github.com/melodyguan/enas/blob/master/src/cifar10/general_child.py#L245
-    '''
+class FixedLayer(torch.nn.Module):
+
     def __init__(self, layer_id, in_planes, out_planes, sample_arc):
-        super(FixedLayer, self).__init__()
+        """
+
+        Parameters
+        ----------
+        layer_id :
+            current layer
+        in_planes : int
+            number of input planes
+        out_planes : int
+            number of output planes
+        sample_arc : list
+            sampling sequence
+        """
+        super().__init__()
 
         self.layer_id = layer_id
         self.in_planes = in_planes
@@ -130,11 +180,13 @@ class FixedLayer(nn.Module):
         if self.layer_type == 0:
             self.branch = ConvBranch(in_planes, out_planes, kernel_size=3)
         elif self.layer_type == 1:
-            self.branch = ConvBranch(in_planes, out_planes, kernel_size=3, separable=True)
+            self.branch = ConvBranch(in_planes, out_planes, kernel_size=3,
+                                     separable=True)
         elif self.layer_type == 2:
             self.branch = ConvBranch(in_planes, out_planes, kernel_size=5)
         elif self.layer_type == 3:
-            self.branch = ConvBranch(in_planes, out_planes, kernel_size=5, separable=True)
+            self.branch = ConvBranch(in_planes, out_planes, kernel_size=5,
+                                     separable=True)
         elif self.layer_type == 4:
             self.branch = PoolBranch(in_planes, out_planes, 'avg')
         elif self.layer_type == 5:
@@ -142,12 +194,13 @@ class FixedLayer(nn.Module):
         else:
             raise ValueError("Unknown layer_type {}".format(self.layer_type))
 
-        # Use concatentation instead of addition in the fixed layer for some reason
+        # Use concatentation instead of addition in the fixed layer for some
+        # reason
         in_planes = int((torch.sum(self.skip_indices).item() + 1) * in_planes)
-        self.dim_reduc = nn.Sequential(
-            nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=False),
-            nn.ReLU(),
-            nn.BatchNorm2d(out_planes, track_running_stats=False))
+        self.dim_reduc = torch.nn.Sequential(
+            torch.nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=False),
+            torch.nn.ReLU(),
+            torch.nn.InstanceNorm2d(out_planes))
 
     def forward(self, x, prev_layers, sample_arc):
         out = self.branch(x)
@@ -163,13 +216,16 @@ class FixedLayer(nn.Module):
         return out
 
 
-class SeparableConv(nn.Module):
+class SeparableConv(torch.nn.Module):
     def __init__(self, in_planes, out_planes, kernel_size, bias):
         super(SeparableConv, self).__init__()
         padding = (kernel_size - 1) // 2
-        self.depthwise = nn.Conv2d(in_planes, in_planes, kernel_size=kernel_size,
-                                   padding=padding, groups=in_planes, bias=bias)
-        self.pointwise = nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=bias)
+        self.depthwise = torch.nn.Conv2d(in_planes, in_planes,
+                                         kernel_size=kernel_size,
+                                         padding=padding, groups=in_planes,
+                                         bias=bias)
+        self.pointwise = torch.nn.Conv2d(in_planes, out_planes, kernel_size=1,
+                                         bias=bias)
 
     def forward(self, x):
         out = self.depthwise(x)
@@ -177,12 +233,23 @@ class SeparableConv(nn.Module):
         return out
 
 
-class ConvBranch(nn.Module):
-    '''
-    https://github.com/melodyguan/enas/blob/master/src/cifar10/general_child.py#L483
-    '''
+class ConvBranch(torch.nn.Module):
+
     def __init__(self, in_planes, out_planes, kernel_size, separable=False):
-        super(ConvBranch, self).__init__()
+        """
+        Parameters
+        ----------
+        in_planes : int
+            number of input planes
+        out_planes : int
+            number of output planes
+        kernel_size : int
+            kernel size
+        separable : bool
+            whether to use a separable conv or not
+
+        """
+        super().__init__()
         assert kernel_size in [3, 5], "Kernel size must be either 3 or 5"
 
         self.in_planes = in_planes
@@ -190,23 +257,24 @@ class ConvBranch(nn.Module):
         self.kernel_size = kernel_size
         self.separable = separable
 
-        self.inp_conv1 = nn.Sequential(
-            nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_planes, track_running_stats=False),
-            nn.ReLU())
+        self.inp_conv1 = torch.nn.Sequential(
+            torch.nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=False),
+            torch.nn.BatchNorm2d(out_planes),
+            torch.nn.ReLU())
 
         if separable:
-            self.out_conv = nn.Sequential(
-                SeparableConv(in_planes, out_planes, kernel_size=kernel_size, bias=False),
-                nn.BatchNorm2d(out_planes, track_running_stats=False),
-                nn.ReLU())
+            self.out_conv = torch.nn.Sequential(
+                SeparableConv(in_planes, out_planes, kernel_size=kernel_size,
+                              bias=False),
+                torch.nn.BatchNorm2d(out_planes),
+                torch.nn.ReLU())
         else:
             padding = (kernel_size - 1) // 2
-            self.out_conv = nn.Sequential(
-                nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size,
-                          padding=padding, bias=False),
-                nn.BatchNorm2d(out_planes, track_running_stats=False),
-                nn.ReLU())
+            self.out_conv = torch.nn.Sequential(
+                torch.nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size,
+                                padding=padding, bias=False),
+                torch.nn.BatchNorm2d(out_planes),
+                torch.nn.ReLU())
 
     def forward(self, x):
         out = self.inp_conv1(x)
@@ -214,26 +282,37 @@ class ConvBranch(nn.Module):
         return out
 
 
-class PoolBranch(nn.Module):
-    '''
-    https://github.com/melodyguan/enas/blob/master/src/cifar10/general_child.py#L546
-    '''
+class PoolBranch(torch.nn.Module):
+
     def __init__(self, in_planes, out_planes, avg_or_max):
-        super(PoolBranch, self).__init__()
+        """
+
+        Parameters
+        ----------
+        in_planes : int
+            number of input planes
+        out_planes : int
+            number of output planes
+        avg_or_max : str
+            whether to use avg or max pool
+        """
+        super().__init__()
 
         self.in_planes = in_planes
         self.out_planes = out_planes
         self.avg_or_max = avg_or_max
 
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=False),
-            nn.BatchNorm2d(out_planes, track_running_stats=False),
-            nn.ReLU())
+        self.conv1 = torch.nn.Sequential(
+            torch.nn.Conv2d(in_planes, out_planes, kernel_size=1, bias=False),
+            torch.nn.InstanceNorm2d(out_planes),
+            torch.nn.ReLU())
 
         if avg_or_max == 'avg':
-            self.pool = torch.nn.AvgPool2d(kernel_size=3, stride=1, padding=1)
+            self.pool = torch.torch.nn.AvgPool2d(kernel_size=3, stride=1,
+                                                 padding=1)
         elif avg_or_max == 'max':
-            self.pool = torch.nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+            self.pool = torch.torch.nn.MaxPool2d(kernel_size=3, stride=1,
+                                                 padding=1)
         else:
             raise ValueError("Unknown pool {}".format(avg_or_max))
 
@@ -243,7 +322,7 @@ class PoolBranch(nn.Module):
         return out
 
 
-class SharedCNN(nn.Module):
+class SharedCNN(torch.nn.Module):
     def __init__(self,
                  num_layers=12,
                  num_branches=6,
@@ -262,36 +341,40 @@ class SharedCNN(nn.Module):
         pool_distance = self.num_layers // 3
         self.pool_layers = [pool_distance - 1, 2 * pool_distance - 1]
 
-        self.stem_conv = nn.Sequential(
-            nn.Conv2d(3, out_filters, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_filters, track_running_stats=False))
+        self.stem_conv = torch.nn.Sequential(
+            torch.nn.Conv2d(3, out_filters, kernel_size=3, padding=1, bias=False),
+            torch.nn.InstanceNorm2d(out_filters))
 
-        self.layers = nn.ModuleList([])
-        self.pooled_layers = nn.ModuleList([])
+        self.layers = torch.nn.ModuleList([])
+        self.pooled_layers = torch.nn.ModuleList([])
 
         for layer_id in range(self.num_layers):
             if self.fixed_arc is None:
                 layer = ENASLayer(layer_id, self.out_filters, self.out_filters)
             else:
-                layer = FixedLayer(layer_id, self.out_filters, self.out_filters, self.fixed_arc[str(layer_id)])
+                layer = FixedLayer(layer_id, self.out_filters, self.out_filters,
+                                   self.fixed_arc[str(layer_id)])
             self.layers.append(layer)
 
             if layer_id in self.pool_layers:
                 for i in range(len(self.layers)):
                     if self.fixed_arc is None:
-                        self.pooled_layers.append(FactorizedReduction(self.out_filters, self.out_filters))
+                        self.pooled_layers.append(FactorizedReduction(
+                            self.out_filters, self.out_filters))
                     else:
-                        self.pooled_layers.append(FactorizedReduction(self.out_filters, self.out_filters * 2))
+                        self.pooled_layers.append(FactorizedReduction(
+                            self.out_filters, self.out_filters * 2))
                 if self.fixed_arc is not None:
                     self.out_filters *= 2
 
-        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.dropout = nn.Dropout(p=1. - self.keep_prob)
-        self.classify = nn.Linear(self.out_filters, 10)
+        self.global_avg_pool = torch.nn.AdaptiveAvgPool2d((1, 1))
+        self.dropout = torch.nn.Dropout(p=1. - self.keep_prob)
+        self.classify = torch.nn.Linear(self.out_filters, 10)
 
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_uniform_(m.weight, mode='fan_in', nonlinearity='relu')
+            if isinstance(m, torch.nn.Conv2d):
+                torch.nn.init.kaiming_uniform_(m.weight, mode='fan_in',
+                                               nonlinearity='relu')
 
     def forward(self, x, sample_arc):
 
@@ -300,11 +383,13 @@ class SharedCNN(nn.Module):
         prev_layers = []
         pool_count = 0
         for layer_id in range(self.num_layers):
-            x = self.layers[layer_id](x, prev_layers, sample_arc[str(layer_id)])
+            x = self.layers[layer_id](x, prev_layers,
+                                      sample_arc[str(layer_id)])
             prev_layers.append(x)
             if layer_id in self.pool_layers:
                 for i, prev_layer in enumerate(prev_layers):
-                    # Go through the outputs of all previous layers and downsample them
+                    # Go through the outputs of all previous layers
+                    # and downsample them
                     prev_layers[i] = self.pooled_layers[pool_count](prev_layer)
                     pool_count += 1
                 x = prev_layers[-1]

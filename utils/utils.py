@@ -1,6 +1,7 @@
 import csv
 import sys
 
+# ToDo Remove stuff completely
 
 class CSVLogger():
     def __init__(self, args, fieldnames, filename='log.csv'):

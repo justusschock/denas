@@ -3,22 +3,37 @@ import numpy as np
 
 
 class Cutout(object):
-    """Randomly mask out a patche from an image.
+    """
+    Randomly mask out a patches from an image.
 
-    Args:
-        length (int): The length (in pixels) of each square patch.
-        p (float): The probability of cutout being applied.
     """
     def __init__(self, length, p=0.5):
+        """
+
+        Parameters
+        ----------
+        length : int
+            The length (in pixels) of each square patch.
+        p : float
+            The probability of cutout being applied.
+
+        """
         self.length = length
         self.p = p
 
     def __call__(self, img):
         """
-        Args:
-            img (Tensor): Tensor image of size (C, H, W).
-        Returns:
-            Tensor: Image with n_holes of dimension length x length cut out of it.
+
+        Parameters
+        ----------
+        img : :class:`torch.Tensor`
+            the image to mask
+
+        Returns
+        -------
+        :class:`torch.Tensor`
+            the masked image
+
         """
 
         if np.random.rand() < self.p:
