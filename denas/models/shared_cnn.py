@@ -399,4 +399,4 @@ class SharedCNN(torch.nn.Module):
         x = self.dropout(x)
         out = self.classify(x)
 
-        return out
+        return {"pred": out}

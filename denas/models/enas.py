@@ -102,7 +102,7 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
             child_grad_bound = model.child_grad_bound
 
         with torch.no_grad():
-            sample_arc = model("controller")
+            sample_arc = model("controller")["pred"]
 
         loss_vals = {}
         metric_vals = {}
@@ -168,7 +168,6 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
 
         loss_vals = {}
         metric_vals = {}
-        total_loss = 0
 
         assert (optimizers and losses) or not optimizers, \
             "Criterion dict cannot be emtpy, if optimizers are passed"
@@ -182,6 +181,8 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
                               ).to(torch.float))
 
         reward = acc.detach()
+
+        loss_vals["controller_acc"] = acc.item()
 
         if isinstance(model, torch.nn.DataParallel):
             controller_backprop = model.module.controller_backprop
@@ -220,6 +221,7 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
             loss += controller_skip_weight * controller_skip_penalties
 
         loss = loss / num_aggregates
+        loss_vals["controller_loss"] = loss.item()
 
         with torch.no_grad():
             for key, metric_fn in metrics.items():
