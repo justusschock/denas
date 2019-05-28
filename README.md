@@ -1,7 +1,5 @@
-# Efficient Neural Architecture Search (ENAS)
+# denas - delira compatible Efficient Neural Architecture Search
 
-This repo contains a PyTorch implementation of [Efficient Neural Architecture Search via Parameters Sharing](https://arxiv.org/abs/1802.03268).
+The implementation in this repository is based on [TDevries](https://github.com/TDeVries)/[enas_pytorch](https://github.com/TDeVries/enas_pytorch).
 
-This implementation is a port of the [official Tensorflow implementation](https://github.com/melodyguan/enas). As such, I have tried to replicate hyperparameter settings and "secret sauce" tricks of the original implementation as closely as possible, although there still appears to be some differences in performance.
-
-Currently only the CNN macro architecture search has been implemented. For a PyTorch implementation of RNN cell search see [carpedm20's ENAS repo](https://github.com/carpedm20/ENAS-pytorch).
+For usage example have a look at [train.py](./train.py). Documentation and Results on CIFAR are yet to come.
