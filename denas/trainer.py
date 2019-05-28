@@ -11,15 +11,15 @@ class ENASTrainerPyTorch(PyTorchNetworkTrainer):
 
     def _setup(self, network: ENASModelPyTorch, optim_fn, optimizer_cls,
                optimizer_params, lr_scheduler_cls, lr_scheduler_params, gpu_ids,
-               convert_batch_to_npy_fn, mixed_precision,
+               key_mapping, convert_batch_to_npy_fn, mixed_precision,
                mixed_precision_kwargs):
 
         self.closure_fn_shared_cnn = network.closure_shared_cnn
         self.closure_fn_controller = network.closure_controller
 
-        super()._setup(network, optim_fn, optimizer_cls, optimizer_cls,
+        super()._setup(network, optim_fn, optimizer_cls, optimizer_params,
                        lr_scheduler_cls, lr_scheduler_params, gpu_ids,
-                       convert_batch_to_npy_fn, mixed_precision,
+                       key_mapping, convert_batch_to_npy_fn, mixed_precision,
                        mixed_precision_kwargs)
 
     def train(self, num_epochs, datamgr_train_controller,
@@ -118,12 +118,23 @@ class ENASTrainerPyTorch(PyTorchNetworkTrainer):
 
             # train single network epoch
             train_metrics, train_losses = self._train_single_epoch(
-                batch_gen_train_shared_cnn, batchgen_train_controller,
+                batch_gen_train_shared_cnn, batchgen_train_controller, epoch,
                 verbose=verbose)
 
             total_metrics = {
                 **train_metrics,
                 **train_losses}
+
+            if datamgr_valid is not None:
+                preds_val, metrics_val = self._evaluate_single_epoch(
+                    datamgr_valid,
+                    datamgr_train_controller,
+                    metrics=self.val_metrics,
+                    metric_keys=self.metric_keys,
+                    verbose=verbose,
+                    epoch=epoch)
+
+            total_metrics.update(metrics_val)
 
             for k, v in total_metrics.items():
                 total_metrics[k] = reduce_fn(v)
@@ -276,7 +287,7 @@ class ENASTrainerPyTorch(PyTorchNetworkTrainer):
         n_batches = batchgen.generator.num_batches * batchgen.num_processes
         if verbose:
             iterable = tqdm(enumerate(batchgen), unit=' batch', total=n_batches,
-                            desc='Epoch %d SharedCNN' % epoch)
+                            desc='Epoch %d Controller' % epoch)
         else:
             iterable = enumerate(batchgen)
 
@@ -338,15 +349,17 @@ class ENASTrainerPyTorch(PyTorchNetworkTrainer):
 
         n_batches = batchgen.generator.num_batches * batchgen.num_processes
         if verbose:
-            iterable = tqdm(enumerate(batchgen)[:n_samples], unit=' batch', total=n_batches,
+            iterable = tqdm(enumerate(batchgen), unit=' batch', total=n_batches,
                             desc='Evaluate for best Architecture')
         else:
-            iterable = enumerate(batchgen)[:n_samples]
+            iterable = enumerate(batchgen)
 
 
         arcs = []
         val_accs = []
         for idx, batch in iterable:
+            if idx >= n_samples:
+                break
             batch = self._prepare_batch(batch)
 
             with torch.no_grad():
@@ -355,7 +368,7 @@ class ENASTrainerPyTorch(PyTorchNetworkTrainer):
 
             with torch.no_grad():
                 pred = self.module("shared_cnn", batch["data"], sample_arc)
-            val_acc = torch.mean((torch.max(pred, 1)[1] == batch["labels"]).float())
+            val_acc = torch.mean((torch.max(pred["pred"], 1)[1] == batch["label"]).float())
             val_accs.append(val_acc.item())
 
             if verbose:

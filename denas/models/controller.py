@@ -43,7 +43,7 @@ class Controller(torch.nn.Module):
         self.sample_entropy = None
         self.sample_log_prob = None
         self.skip_count = None
-        self.skip_penaltys = None
+        self.skip_penalties = None
 
     def _create_params(self):
 
@@ -88,7 +88,7 @@ class Controller(torch.nn.Module):
         entropys = []
         log_probs = []
         skip_count = []
-        skip_penaltys = []
+        skip_penalties = []
 
         inputs = self.g_emb.weight
         skip_targets = torch.tensor([1.0 - self.skip_target, self.skip_target],
@@ -145,7 +145,7 @@ class Controller(torch.nn.Module):
                 skip_prob = torch.sigmoid(logit)
                 kl = skip_prob * torch.log(skip_prob / skip_targets)
                 kl = torch.sum(kl)
-                skip_penaltys.append(kl)
+                skip_penalties.append(kl)
 
                 log_prob = skip_dist.log_prob(skip)
                 log_prob = torch.sum(log_prob)
@@ -180,7 +180,7 @@ class Controller(torch.nn.Module):
         skip_count = torch.stack(skip_count)
         self.skip_count = torch.sum(skip_count)
 
-        skip_penaltys = torch.stack(skip_penaltys)
+        skip_penaltys = torch.stack(skip_penalties)
         self.skip_penaltys = torch.mean(skip_penaltys)
 
         return {"pred": self.sample_arc}

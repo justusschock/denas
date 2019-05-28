@@ -43,6 +43,7 @@ class ENASExperimentPyTorch(PyTorchExperiment):
         callback = CosineAnnealingLRCallbackPyTorch(
             trainer.optimizers["shared_cnn"], T_max=T_max, eta_min=eta_min)
         trainer.register_callback(callback)
+        return trainer
 
     def run(self, train_data_controller: BaseDataManager,
             train_data_shared_cnn: BaseDataManager,

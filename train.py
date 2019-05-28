@@ -1,5 +1,5 @@
 from denas import ENASExperimentPyTorch, ENASModelPyTorch
-from denas.utils import Config
+from denas.utils import Config, accuracy_metric
 from delira.training import Parameters
 from delira.data_loading.dataset import TorchvisionClassificationDataset
 from delira.data_loading import BaseDataManager
@@ -8,29 +8,32 @@ import os
 from batchgenerators.transforms import Compose, RandomCropTransform, \
     PadTransform, MirrorTransform, ZeroMeanUnitVarianceTransform
 
+import torch
+
 
 def create_datasets(config: dict, **kwargs):
     batchsize = config["training"].pop("batchsize")
     num_processes = config["training"].pop("num_processes")
 
+    data_path = config["training"].pop("data_path",
+                                       os.path.join(os.getcwd(), "data"))
+
     dset_train = TorchvisionClassificationDataset(
         "cifar10",
-        root=config["training"].pop("data_path",
-                                    os.path.join(os.getcwd(), "data")),
+        root=data_path,
         train=True, download=True,
         img_shape=(32, 32), one_hot=False,
         **kwargs)
 
     dset_val = TorchvisionClassificationDataset(
         "cifar10",
-        root=config["training"].pop("data_path",
-                                    os.path.join(os.getcwd(), "data")),
+        root=data_path,
         train=False, download=True,
         img_shape=(32, 32), one_hot=False,
         **kwargs)
 
     train_trafos = Compose([
-        PadTransform(36),
+        PadTransform((36, 36)),
         RandomCropTransform(32),
         MirrorTransform((1,)),
         ZeroMeanUnitVarianceTransform()
@@ -86,7 +89,23 @@ def create_experiment_from_config(config: dict):
                 "child_grad_bound": config["child"].pop("grad_bound", 5.0)
             },
             "training": {
-                # TODO: Add training parameters
+                "num_epochs": 500,
+                "losses": {
+                    "shared_cnn": torch.nn.CrossEntropyLoss()
+                },
+                "val_metrics": {"acc": accuracy_metric},
+                "optimizer_cls": {"controller": torch.optim.Adam,
+                                  "shared_cnn": torch.optim.SGD},
+                "optimizer_params": {
+                    "shared_cnn": {"lr": config["child"].pop("lr_max"),
+                                   "momentum": 0.9, "nesterov": True,
+                                   "weight_decay": config["child"].pop("l2_reg")},
+                    "controller": {
+                        "lr": config["controller"].pop("lr"),
+                        "betas": (0.0, 0.999),
+                        "eps": 1e-3
+                    }
+                }
             }
         }
     )
@@ -94,7 +113,8 @@ def create_experiment_from_config(config: dict):
     experiment = ENASExperimentPyTorch(params, ENASModelPyTorch,
                                        config["training"].pop("num_epochs", 50),
                                        save_path=config["training"].pop(
-                                           "save_path", None)
+                                           "save_path", None),
+                                       val_score_key="val_acc"
                                        )
 
     return experiment
@@ -111,11 +131,12 @@ def start_training(config_path: str = "./enas.config", dset_kwargs: dict = {},
 
     experiment.run(train_data_controller=data["train_controller"],
                    train_data_shared_cnn=data["train_shared_cnn"],
-                   val_data=data["val"], **kwargs)
+                   val_data=data["val"], T_max=config["child"].pop("T_max"),
+                   eta_min=config["child"].pop("lr_min"), **kwargs)
 
 
 if __name__ == '__main__':
     DSET_KWARGS = {}
-    KWARGS = {}
-    CONFIG_PATH = ""
+    KWARGS = {"gpu_ids": [0]}
+    CONFIG_PATH = "./enas.config"
     start_training(CONFIG_PATH, DSET_KWARGS, **KWARGS)

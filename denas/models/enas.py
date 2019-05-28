@@ -2,6 +2,7 @@ from delira.models import AbstractPyTorchNetwork
 import torch
 from .controller import Controller
 from .shared_cnn import SharedCNN
+from delira.models.model_utils import scale_loss
 
 
 class ENASModelPyTorch(AbstractPyTorchNetwork):
@@ -42,7 +43,7 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
                           child_keep_prob, child_fixed_arc)
 
     def forward(self, model_name, *args, **kwargs):
-        return {"pred": getattr(self, model_name)(*args, **kwargs)}
+        return getattr(self, model_name)(*args, **kwargs)
 
     def _build_model(self, search_for, search_whole_channels, child_num_layers,
                      child_num_branches, child_out_filters,
@@ -80,8 +81,8 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
     def prepare_batch(batch: dict, input_device, output_device):
         batch["data"] = torch.from_numpy(batch["data"]).to(input_device,
                                                            torch.float)
-        batch["label"] = torch.from_numpy(batch["data"]).to(output_device,
-                                                            torch.long)
+        batch["label"] = torch.from_numpy(batch["label"]).to(output_device,
+                                                             torch.long).squeeze(-1)
 
         return batch
 
@@ -138,7 +139,7 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
         if optimizers:
             optimizers['shared_cnn'].zero_grad()
             # perform loss scaling via apex if half precision is enabled
-            with optimizers["shared_cnn"].scale_loss(total_loss) as scaled_loss:
+            with scale_loss(total_loss, optimizers["shared_cnn"]) as scaled_loss:
                 scaled_loss.backward()
 
             grad_norm = torch.nn.utils.clip_grad_norm(model.parameters(),
@@ -164,7 +165,7 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
     def closure_controller(model, data_dict: dict, optimizers: dict, losses={},
                            metrics={}, fold=0, **kwargs):
 
-        sample_arc = model("controller")
+        sample_arc = model("controller")["pred"]
 
         loss_vals = {}
         metric_vals = {}
@@ -177,7 +178,7 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
             inputs = data_dict.pop("data")
             preds = model("shared_cnn", inputs, sample_arc)
 
-            acc = torch.mean((torch.amax(preds["pred"], 1) == data_dict["label"]
+            acc = torch.mean((torch.argmax(preds["pred"], 1) == data_dict["label"]
                               ).to(torch.float))
 
         reward = acc.detach()
@@ -186,25 +187,25 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
 
         if isinstance(model, torch.nn.DataParallel):
             controller_backprop = model.module.controller_backprop
-            num_aggregates = model.module.num_aggregates
+            num_aggregates = model.module.controller_num_aggregates
             controller_baseline_decay = model.module.controller_baseline_decay
             baseline = model.module.baseline
             controller_entropy_weight = model.module.controller_entropy_weight
             sample_entropy = model.module.controller.sample_entropy
             sample_log_prob = model.module.controller.sample_log_prob
-            controller_skip_weight = model.module.controller_skip_weight
-            controller_skip_penalties = model.module.controller_skip_penalies
+            controller_skip_weight = model.module.controller.skip_weight
+            controller_skip_penalties = model.module.controller_skip_penalties
             child_grad_bound = model.module.child_grad_bound
         else:
             controller_backprop = model.controller_backprop
-            num_aggregates = model.num_aggregates
+            num_aggregates = model.controller_num_aggregates
             baseline = model.baseline
             controller_baseline_decay = model.controller_baseline_decay
             controller_entropy_weight = model.controller_entropy_weight
             sample_entropy = model.controller.sample_entropy
             sample_log_prob = model.controller.sample_log_prob
-            controller_skip_weight = model.controller_skip_weight
-            controller_skip_penalties = model.controller_skip_penalies
+            controller_skip_weight = model.controller.skip_weight
+            controller_skip_penalties = model.controller_skip_penalties
             child_grad_bound = model.child_grad_bound
 
         reward += controller_entropy_weight * sample_entropy
@@ -228,12 +229,12 @@ class ENASModelPyTorch(AbstractPyTorchNetwork):
                 metric_vals["controller_" + key] = metric_fn(
                     preds["pred"], data_dict["label"]).item()
 
-        with optimizers["controller"].scale_loss(loss) as scaled_loss:
+        with scale_loss(loss,  optimizers["controller"]) as scaled_loss:
             scaled_loss.backward(retain_graph=True)
 
         if controller_backprop:
-            grad_norm = torch.nn.utils.clip_grad_norm(model.parameters(),
-                                                      child_grad_bound)
+            torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                           child_grad_bound)
             optimizers["controller"].step()
             optimizers["controller"].zero_grad()
 
